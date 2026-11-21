@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!server.js
+!package.json
+!public/
+!public/**

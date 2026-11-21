@@ -1,0 +1,16 @@
+{
+  "name": "alena-balance",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test.js records.test.js browser.test.js",
+    "test:coverage": "node --test --experimental-test-coverage test.js records.test.js browser.test.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
