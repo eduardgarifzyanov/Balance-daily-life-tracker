@@ -10,7 +10,46 @@ test('Android diary stores, edits, imports and exports records without an API se
   t.after(() => browser.close());
   const page = await browser.newPage({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
   await page.addInitScript(() => {
-    window.BalanceAndroid = {saveBackup: json => { window.exported = JSON.parse(json); }};
+    if (!sessionStorage.getItem('native-reminders')) {
+      localStorage.setItem('balance.reminders.1', JSON.stringify([
+        {id:1, name:'Старое расписание', days:[1], time:'09:00', enabled:true}
+      ]));
+    }
+    const key = 'native-reminders';
+    window.BalanceAndroid = {
+      saveBackup: json => { window.exported = JSON.parse(json); },
+      getReminders: legacy => {
+        if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, legacy);
+        return sessionStorage.getItem(key);
+      },
+      reminderNotificationsAllowed: () => Boolean(window.allowed),
+      exactRemindersAllowed: () => Boolean(window.exact),
+      openReminderSettings: () => {
+        window.allowed = true;
+        window.balanceReminderStatusChanged();
+      },
+      openExactReminderSettings: () => {
+        window.exact = true;
+        window.balanceReminderStatusChanged();
+      },
+      testReminder: () => { window.testDelivered = Boolean(window.allowed); return window.testDelivered; },
+      takeReminderDestination: () => {
+        const destination = window.pendingDestination;
+        window.pendingDestination = null;
+        return destination;
+      },
+      changeReminder: (action, argument) => {
+        const items = JSON.parse(sessionStorage.getItem(key));
+        if (action === 'add') items.push(JSON.parse(argument));
+        if (action === 'delete') items.splice(items.findIndex(item => item.id === Number(argument)), 1);
+        if (action === 'toggle') {
+          const item = items.find(item => item.id === Number(argument));
+          item.enabled = !item.enabled;
+        }
+        sessionStorage.setItem(key, JSON.stringify(items));
+        return true;
+      }
+    };
   });
   const publicDir = path.join(__dirname, '..', 'public');
   const requests = [];
@@ -68,6 +107,32 @@ test('Android diary stores, edits, imports and exports records without an API se
   await page.locator('[data-delete]').first().click();
   await page.getByRole('status').getByText('Запись удалена').waitFor();
   assert.equal(await page.locator('.entry').count(), 2);
+  await tab('Напоминания');
+  await page.getByText('Старое расписание', {exact:true}).waitFor();
+  assert.equal(await page.evaluate(() => localStorage.getItem('balance.reminders.1')), null);
+  await page.locator('#signalTest').click();
+  await page.getByText('Сначала разреши уведомления в Android', {exact:true}).waitFor();
+  await page.locator('#systemAlerts').click();
+  await page.locator('#exactAlerts').click();
+  await page.locator('#notifyStatus').getByText('Уведомления и точное время включены.').waitFor();
+  await page.locator('#signalTest').click();
+  assert.equal(await page.evaluate(() => window.testDelivered), true);
+  await page.locator('[name=message]').fill('Размяться');
+  await page.locator('#schedule button').click();
+  const entry = page.locator('.entry').filter({hasText:'Размяться'});
+  await entry.getByText('Размяться', {exact:true}).waitFor();
+  await entry.getByRole('button', {name:'Пауза'}).click();
+  await entry.getByText(/На паузе/).waitFor();
+  await entry.locator('[data-drop]').click();
+  await entry.waitFor({state:'detached'});
+  await page.locator('#delay').fill('1');
+  await page.locator('#remind').click();
+  await page.getByText('Пора выпить воды', {exact:true}).waitFor();
+  await page.evaluate(() => {
+    window.pendingDestination = 'Питание';
+    window.balanceOpenNotification();
+  });
+  await page.getByRole('heading', {name:'Питание', exact:true}).waitFor();
   assert.deepEqual(requests, []);
 });
 

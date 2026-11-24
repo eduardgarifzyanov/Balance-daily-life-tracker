@@ -246,4 +246,4 @@ dialog::backdrop { background: #16281ec0; }
 }
 
 
-#import-file[hidden] { display: none; }
+#import-file[hidden], #systemAlerts[hidden], #exactAlerts[hidden] { display: none; }

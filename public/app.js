@@ -107,7 +107,9 @@ function auth() {
 async function startSession(account) {
   records = await api('/records');
   user = account;
+  if (offline) reminders(); // Migrate alarms saved by the previous APK before Android needs them.
   render();
+  if (offline) window.balanceOpenNotification();
 }
 
 async function restoreSession(account) {
@@ -245,8 +247,18 @@ function consistency() {
 
 }
 const weekdays=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
-function reminders(){
-  try{return JSON.parse(localStorage.getItem('balance.reminders.'+user.id)||'[]')}catch{return []}
+function reminders() {
+  const key = 'balance.reminders.' + user.id;
+  try {
+    const legacy = localStorage.getItem(key) || '[]';
+    if (!offline) return JSON.parse(legacy);
+
+    const result = JSON.parse(window.BalanceAndroid.getReminders(legacy));
+    localStorage.removeItem(key);
+    return result;
+  } catch {
+    return [];
+  }
 }
 function storeReminders(items){localStorage.setItem('balance.reminders.'+user.id,JSON.stringify(items))}
 let soundContext;
@@ -305,15 +317,20 @@ function reminderView(){
     return '<div class="entry"><div><b>'+esc(item.name)+'</b><small>'+esc(schedule)+(item.enabled?'':' · На паузе')+'</small></div><div><button data-switch="'+item.id+'">'+(item.enabled?'Пауза':'Включить')+'</button> <button data-drop="'+item.id+'" aria-label="Удалить напоминание">×</button></div></div>';
   }).join('');
   const checks=[1,2,3,4,5,6,0].map(d=>'<label><input type="checkbox" name="weekday" value="'+d+'" checked>'+weekdays[d]+'</label>').join('');
-  const systemButton = offline ? '' : ' <button id="systemAlerts">Системные уведомления</button>';
-  return panel('Сигнал напоминания','<button id="signalTest">Проверить звук и сообщение</button>' + systemButton + '<p id="notifyStatus" role="status"></p>')+panel('Мои напоминания',items||'<p>Пока нет напоминаний.</p>')+
+
+  const notificationControls = offline
+    ? '<div class="quick"><button id="systemAlerts">Разрешить уведомления</button>' +
+      '<button id="exactAlerts">Разрешить точное время</button>' +
+      '<button id="signalTest">Проверить уведомление</button></div>'
+    : '<button id="signalTest">Проверить звук и сообщение</button> <button id="systemAlerts">Системные уведомления</button>';
+  return panel('Уведомления', notificationControls + '<p id="notifyStatus" role="status"></p>')+panel('Мои напоминания',items||'<p>Пока нет напоминаний.</p>')+
     panel('Новое расписание','<form id="schedule" class="formgrid"><label>О чём напомнить<input name="message" placeholder="Например, размяться" maxlength="100" required></label><label>Время<input type="time" name="time" value="09:00" required></label><fieldset class="days"><legend>Повторять по дням</legend>'+checks+'</fieldset><button class="primary">Добавить расписание</button></form>')+
     panel('Разовое напоминание о воде','<label>Через сколько минут<input type="number" id="delay" min="1" max="1440" value="30" required></label><button id="remind">Запустить таймер</button>')+
-    (offline ? '<p class="muted">Оставь приложение открытым, чтобы услышать сигнал. Расписания хранятся на этом телефоне.</p>'
+    (offline ? '<p class="muted">Android показывает напоминания даже при закрытом приложении. Расписания хранятся на этом телефоне.</p>'
       : '<p class="muted">Расписания сохраняются в этом браузере для твоего аккаунта. Оставьте приложение открытым. При приостановке вкладки сигнал может появиться после возвращения.</p>');
 }
 function checkReminders(){
-  if(!user)return;
+  if (offline || !user) return;
   const now=new Date(),time=now.toTimeString().slice(0,5),items=reminders(),due=[];
   for(const item of items){
     if(!item.enabled)continue;
@@ -328,39 +345,93 @@ function checkReminders(){
 }
 setInterval(checkReminders,5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkReminders()});
-function bindReminders(){
-  const status=$('#notifyStatus');
-  function permissionStatus(){
-    status.textContent=({granted:'Системные уведомления разрешены.',denied:'Системные уведомления заблокированы. Разрешите их в настройках сайта.',default:'Для системных уведомлений нужно разрешение браузера.'})[window.Notification?.permission]||'Доступны звук и сообщение внутри приложения.';
-  }
-  permissionStatus();
-  const systemAlerts = $('#systemAlerts');
-  if (systemAlerts) systemAlerts.onclick=async()=>{
-    enableSound();
-    try{if(window.Notification?.permission==='default')await Notification.requestPermission();permissionStatus()}
-    catch{status.textContent='Проверьте разрешения уведомлений в настройках браузера.'}
-  };
-  $('#signalTest').onclick=async()=>{enableSound();if(soundContext)await soundContext.resume().catch(()=>{});deliverReminder('Проверка напоминания')};
-  function update(items){storeReminders(items);render()}
-  $('#schedule').onsubmit=e=>{
-    e.preventDefault();
-    const data=new FormData(e.target),days=data.getAll('weekday').map(Number),name=data.get('message').trim();
-    if(!days.length||!name)return toast('Введите текст и выберите дни недели');
-    update([...reminders(),{id:Date.now(),name,time:data.get('time'),days,enabled:true}]);
-  };
-  $('#remind').onclick=()=>{
-    const input=$('#delay');
-    if(!input.reportValidity())return;
-    const minutes=input.valueAsNumber;
-    update([...reminders(),{id:Date.now(),name:'Пора выпить воды',minutes,due:Date.now()+minutes*60000,enabled:true}]);
-  };
-  document.querySelectorAll('[data-drop]').forEach(b=>b.onclick=()=>update(reminders().filter(i=>i.id!==Number(b.dataset.drop))));
-  document.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>update(reminders().map(i=>{
-    if(i.id!==Number(b.dataset.switch))return i;
-    if(i.due&&!i.enabled)i.due=Date.now()+i.minutes*60000;
-    return {...i,enabled:!i.enabled,enabledSince:Date.now()};
-  })));
+function showAndroidReminderStatus() {
+  const status = $('#notifyStatus');
+  if (!status || page !== 'Напоминания') return;
+
+  const allowed = window.BalanceAndroid.reminderNotificationsAllowed();
+  const exact = window.BalanceAndroid.exactRemindersAllowed();
+  $('#systemAlerts').hidden = allowed;
+  $('#exactAlerts').hidden = exact;
+  status.textContent = !allowed ? 'Чтобы получать напоминания, разреши уведомления в Android.'
+    : exact ? 'Уведомления и точное время включены.'
+    : 'Уведомления включены. Без доступа к точному времени Android может их задерживать.';
 }
+
+function changeReminder(action, value) {
+  if (offline) {
+    if (!window.BalanceAndroid.changeReminder(action, action === 'add' ? JSON.stringify(value) : String(value))) {
+      toast('Не удалось изменить напоминание');
+    }
+  } else {
+    const items = reminders();
+    if (action === 'add') storeReminders([...items, value]);
+    if (action === 'delete') storeReminders(items.filter(item => item.id !== value));
+    if (action === 'toggle') storeReminders(items.map(item => {
+      if (item.id !== value) return item;
+      if (item.due && !item.enabled) item.due = Date.now() + item.minutes * 60000;
+      return {...item, enabled: !item.enabled, enabledSince: Date.now()};
+    }));
+  }
+  render();
+}
+
+function bindReminders() {
+  if (offline) {
+    showAndroidReminderStatus();
+    $('#systemAlerts').onclick = () => window.BalanceAndroid.openReminderSettings();
+    $('#exactAlerts').onclick = () => window.BalanceAndroid.openExactReminderSettings();
+    $('#signalTest').onclick = () => {
+      if (!window.BalanceAndroid.testReminder()) toast('Сначала разреши уведомления в Android');
+    };
+  } else {
+    const status = $('#notifyStatus');
+    function permissionStatus() {
+      status.textContent = ({
+        granted: 'Системные уведомления разрешены.',
+        denied: 'Системные уведомления заблокированы. Разрешите их в настройках сайта.',
+        default: 'Для системных уведомлений нужно разрешение браузера.'
+      })[window.Notification?.permission] || 'Доступны звук и сообщение внутри приложения.';
+    }
+    permissionStatus();
+    $('#systemAlerts').onclick = async () => {
+      enableSound();
+      try {
+        if (window.Notification?.permission === 'default') await Notification.requestPermission();
+        permissionStatus();
+      } catch {
+        status.textContent = 'Проверьте разрешения уведомлений в настройках браузера.';
+      }
+    };
+    $('#signalTest').onclick = async () => {
+      enableSound();
+      if (soundContext) await soundContext.resume().catch(() => {});
+      deliverReminder('Проверка напоминания');
+    };
+  }
+  $('#schedule').onsubmit = event => {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const days = data.getAll('weekday').map(Number);
+    const name = data.get('message').trim();
+    if (!days.length || !name) return toast('Введите текст и выберите дни недели');
+    changeReminder('add', {id: Date.now(), name, time: data.get('time'), days, enabled: true});
+  };
+  $('#remind').onclick = () => {
+    const input = $('#delay');
+    if (!input.reportValidity()) return;
+    const minutes = input.valueAsNumber;
+    const id = Date.now();
+    changeReminder('add', {id, name: 'Пора выпить воды', minutes, due: id + minutes * 60000, enabled: true});
+  };
+  document.querySelectorAll('[data-drop]').forEach(button => {
+    button.onclick = () => changeReminder('delete', Number(button.dataset.drop));
+  });
+  document.querySelectorAll('[data-switch]').forEach(button => {
+    button.onclick = () => changeReminder('toggle', Number(button.dataset.switch));
+  });
+}
+
 
 function navigationIcon(page) {
   const drawings = {
@@ -696,7 +767,21 @@ function bindDiaryTools(){
   });
   if($('#newrecipe'))$('#newrecipe').onclick=recipeForm;
 }
+if (offline) {
+  window.balanceReminderStatusChanged = showAndroidReminderStatus;
+  window.balanceOpenNotification = () => {
+    if (!user) return;
+    const destination = window.BalanceAndroid.takeReminderDestination();
+    if (destination === 'Напоминания' || destination === 'Питание') {
+      page = destination;
+      render();
+      window.scrollTo(0, 0);
+    }
+  };
+}
+
 if (offline) window.balanceBack = () => {
+
   const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
   if (dialog) {
     dialog.close();

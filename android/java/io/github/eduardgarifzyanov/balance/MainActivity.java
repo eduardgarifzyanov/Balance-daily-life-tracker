@@ -1,12 +1,15 @@
 package io.github.eduardgarifzyanov.balance;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.WindowInsets;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -31,6 +34,7 @@ public final class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private static final int OPEN_BACKUP = 1;
     private static final int SAVE_BACKUP = 2;
+    private static final int NOTIFICATION_PERMISSION = 3;
     private static final Map<String, String> FILES = new HashMap<>();
     static {
         FILES.put("/", "text/html");
@@ -45,10 +49,12 @@ public final class MainActivity extends Activity {
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private byte[] exportData;
+    private String reminderDestination;
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        reminderDestination = getIntent().getStringExtra(ReminderScheduler.OPEN_SECTION);
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(246, 247, 239));
         webView = new WebView(this);
@@ -132,7 +138,111 @@ public final class MainActivity extends Activity {
             new ByteArrayInputStream(new byte[0]));
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ReminderScheduler.refresh(this, false);
+        refreshReminderControls();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        synchronized (this) {
+            reminderDestination = intent.getStringExtra(ReminderScheduler.OPEN_SECTION);
+        }
+        if (webView != null) {
+            webView.evaluateJavascript("window.balanceOpenNotification && window.balanceOpenNotification()", null);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == NOTIFICATION_PERMISSION) {
+            ReminderScheduler.refresh(this, false);
+            refreshReminderControls();
+        }
+    }
+
+    private void refreshReminderControls() {
+        if (webView != null) {
+            webView.evaluateJavascript("window.balanceReminderStatusChanged && window.balanceReminderStatusChanged()", null);
+        }
+    }
+
+    private void openSettings(Intent intent) {
+        try {
+            startActivity(intent);
+        } catch (ActivityNotFoundException error) {
+            notifyUser("Открой настройки «Баланс» в Android");
+        }
+    }
+
     public final class BackupBridge {
+        @JavascriptInterface
+        public String getReminders(String legacy) {
+            return ReminderScheduler.list(MainActivity.this, legacy);
+        }
+
+        @JavascriptInterface
+        public boolean changeReminder(String action, String argument) {
+            return ReminderScheduler.change(MainActivity.this, action, argument);
+        }
+
+        @JavascriptInterface
+        public boolean reminderNotificationsAllowed() {
+            return ReminderScheduler.canNotify(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public boolean exactRemindersAllowed() {
+            return ReminderScheduler.canBeExact(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public void openReminderSettings() {
+            runOnUiThread(() -> {
+                boolean requested = getPreferences(MODE_PRIVATE).getBoolean("notificationRequested", false);
+                if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    && (!requested || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+                    getPreferences(MODE_PRIVATE).edit().putBoolean("notificationRequested", true).apply();
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION);
+                    return;
+                }
+                boolean appNotifications = ReminderScheduler.notifications(MainActivity.this).areNotificationsEnabled();
+                Intent intent = new Intent(appNotifications
+                    ? Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS : Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                if (appNotifications) intent.putExtra(Settings.EXTRA_CHANNEL_ID, ReminderScheduler.CHANNEL);
+                openSettings(intent);
+            });
+        }
+
+        @JavascriptInterface
+        public void openExactReminderSettings() {
+            if (Build.VERSION.SDK_INT >= 31) {
+                runOnUiThread(() -> openSettings(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                    .setData(Uri.parse("package:" + getPackageName()))));
+            }
+        }
+
+        @JavascriptInterface
+        public boolean testReminder() {
+            return ReminderScheduler.test(MainActivity.this);
+        }
+
+        @JavascriptInterface
+        public String takeReminderDestination() {
+            synchronized (MainActivity.this) {
+                String destination = reminderDestination;
+                reminderDestination = null;
+                return destination;
+            }
+        }
+
         @JavascriptInterface
         public void saveBackup(String json) {
             byte[] data = json.getBytes(StandardCharsets.UTF_8);

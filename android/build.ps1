@@ -21,7 +21,7 @@ $out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($
 $outDir = (Resolve-Path -LiteralPath ([IO.Path]::GetDirectoryName($out))).Path
 $tools = Join-Path $sdk 'build-tools/35.0.0'
 $androidJar = Join-Path $sdk 'platforms/android-35/android.jar'
-$javaFile = Join-Path $PSScriptRoot 'java/io/github/eduardgarifzyanov/balance/MainActivity.java'
+$javaFiles = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'java') -Recurse -Filter '*.java' -File)
 $public = Join-Path (Split-Path $PSScriptRoot -Parent) 'public'
 $temp = Join-Path $outDir ('balance-apk-' + [Guid]::NewGuid().ToString('N'))
 $previousJava = $env:JAVA_HOME
@@ -35,7 +35,7 @@ try {
   Copy-Item -LiteralPath "$public/app.js","$public/style.css","$public/icon.svg","$PSScriptRoot/offline.js" -Destination 'assets'
   Copy-Item -LiteralPath "$public/icon-192.png" -Destination 'res/mipmap-xxxhdpi/ic_launcher.png'
   Copy-Item -LiteralPath "$PSScriptRoot/res/values" -Destination 'res/values' -Recurse
-  Copy-Item -LiteralPath "$PSScriptRoot/AndroidManifest.xml",$androidJar,$javaFile -Destination '.'
+  Copy-Item -LiteralPath (@("$PSScriptRoot/AndroidManifest.xml",$androidJar) + $javaFiles.FullName) -Destination '.'
   $html = [IO.File]::ReadAllText("$public/index.html")
   $html = $html.Replace('<link rel="manifest" href="/manifest.json">', '')
   $entry = '<script src="/app.js" defer></script>'
@@ -45,7 +45,7 @@ try {
 
   Invoke-Tool "$tools/aapt2.exe" @('compile','--dir','res','-o','resources.zip')
   Invoke-Tool "$tools/aapt2.exe" @('link','-o','unsigned.apk','-I','android.jar','--manifest','AndroidManifest.xml','-A','assets','--auto-add-overlay','-R','resources.zip')
-  Invoke-Tool "$jdk/bin/javac.exe" @('--release','8','-encoding','UTF-8','-cp','android.jar','-d','classes','MainActivity.java')
+  Invoke-Tool "$jdk/bin/javac.exe" (@('--release','8','-encoding','UTF-8','-cp','android.jar','-d','classes') + $javaFiles.Name)
   Invoke-Tool "$jdk/bin/jar.exe" @('cMf','classes.jar','-C','classes','.')
   Invoke-Tool "$tools/d8.bat" @('--release','--min-api','26','--lib','android.jar','--output','dex','classes.jar')
   Invoke-Tool "$jdk/bin/jar.exe" @('uf','unsigned.apk','-C','dex','classes.dex')
