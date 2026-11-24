@@ -44,7 +44,7 @@ test('daily diary on phone and desktop',async t=>{
      await tab('Сон и привычки');await entry('sleep',{hours:'7.5'},'7.5 ч');
      await entry('habit',{name:'Чтение'},'Чтение');
      await tab('Напоминания');await fill('message','Разминка');await click('#schedule button');await click('[data-switch]');await page.getByText(/На паузе/).waitFor();await click('[data-drop]');await click('#remind');await page.clock.fastForward(1800000);
-     await page.locator('#reminderAlert').getByText('Пора выпить воды').waitFor();await click('#reminderAlert button');
+     await page.getByRole('button',{name:'Через 15 минут'}).click();await page.locator('#reminderAlert').waitFor({state:'detached'});await page.clock.fastForward(910000);await page.clock.runFor(5000);await page.getByRole('button',{name:'Выпил 250 мл'}).click();await page.locator('#reminderAlert').waitFor({state:'detached'});
      await click('#signalTest');await page.locator('#reminderAlert').getByText('Проверка напоминания').waitFor();await click('#reminderAlert button');
      await tab('Прогресс');await entry('weight',{kg:'70.5',waist:'80'},'70.5 кг');
      assert.equal(await page.locator('.chart b').first().innerText(),'70.5');
@@ -53,7 +53,7 @@ test('daily diary on phone and desktop',async t=>{
      const downloaded=page.waitForEvent('download');await click('#export');
      const file=await (await downloaded).path();
      const exported=JSON.parse(fs.readFileSync(file,'utf8'));
-     assert.equal(exported.records.length,7);
+     assert.equal(exported.records.length,8);
      assert.equal(exported.records.find(r=>r.type==='settings').payload.water,2400);
      await tab('Обзор');await page.getByText('Регулярность дневника').waitFor();assert.equal(await page.locator('[data-water], [data-add=food]').count(),0);await tab('Питание');await page.locator('#date').fill('2099-01-01');assert.notEqual(await page.locator('#date').inputValue(),'2099-01-01');await page.locator('#date').fill('2020-01-01');
      assert.equal(await page.locator('.entry').count(),0);
@@ -67,6 +67,17 @@ test('daily diary on phone and desktop',async t=>{
      await click('[data-water="250"]');await page.locator('.entry').filter({hasText:'250 мл'}).waitFor();
      assert.equal(await page.locator('.earned').count(),1);
      await tab('Обзор');await page.locator('.awards .achieved').filter({hasText:'Водный баланс'}).waitFor();
+     await tab('Питание');
+     await page.locator('#date').fill('2020-01-04');
+     await click('#newrecipe');await fill('dish','Каша');await fill('yield','200');
+     await page.locator('#ingredients select').selectOption('0');await fill('amount','100');
+     await click('#entryform .primary');await click('[data-dish]');await fill('grams','180');
+     await click('#entryform .primary');await page.getByText(/180 г · 79.2 ккал/).waitFor();
+     await click('[data-edit]');await fill('grams','200');await fill('time','08:45');await click('#entryform .primary');
+     await page.getByText(/200 г · 88 ккал/).waitFor();await page.getByText(/08:45/).waitFor();
+     await page.locator('#date').fill('2020-01-05');await click('[data-repeat]');await fill('grams','100');
+     await click('#entryform .primary');await page.getByText(/100 г · 44 ккал/).waitFor();
+     await tab('Обзор');await page.getByText('Дней с записями: 3 из 7.').waitFor();
      await click('#logout');await page.locator('#authform').waitFor();await fill('email',width+'@example.org');await fill('password','Example1234');await click('#authform button');await page.locator('.streak').waitFor();assert.deepEqual(errors,[]);
    }finally{await page.close()}
  });

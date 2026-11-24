@@ -16,11 +16,25 @@ before(async()=>{
 });
 after(async()=>{await new Promise(resolve=>server.close(resolve));db.close()});
 const examples={
+  recipe:{name:'Каша',grams:200,ingredients:[{name:'Овсянка',grams:100,kcal:88,protein:3,fat:1.7,carbs:15}]},
   water:{ml:250},activity:{name:'Ходьба',minutes:20,steps:1500},
   sleep:{hours:7.5,quality:4},weight:{kg:70,waist:80,hips:90},
   food:{name:'Рис',meal:'Обед',grams:120,kcal:156,protein:3.2,fat:.4,carbs:34},
   habit:{name:'Чтение'},settings:{calories:2100,steps:8000,water:2000,protein:90,fat:70,carbs:250}
 };
+test('only owner can edit; creation time survives corrections',async()=>{
+  const entry={type:'water',date:'2024-02-29',payload:{ml:250}};
+  const original=await (await post('/api/records',entry)).json();
+  const other=await post('/api/register',{...credentials,email:'other-editor@example.org'});
+  const edit=(session,payload)=>fetch(base+'/api/records/'+original.id,{
+    method:'PUT',headers:{Cookie:session},body:JSON.stringify({...entry,payload})
+  });
+  assert.equal((await edit(other.headers.get('set-cookie').split(';')[0],{ml:1})).status,404);
+  assert.equal((await edit(cookie,{ml:300,time:'25:01'})).status,400);
+  const result=await edit(cookie,{ml:300,time:'08:45'});
+  assert.equal(result.status,200);
+  assert.equal((await result.json()).createdAt,original.createdAt);
+});
 for(const [type,payload] of Object.entries(examples)){
   test(type+' round trip with leap date',async()=>{
     const date='2024-02-29';
