@@ -5,7 +5,10 @@ let user,records=[],date=today(),page='Обзор',register=false;
 
 const products=[['Овсянка на воде',88,3,1.7,15],['Яйцо варёное',155,12.6,10.6,1.1],['Куриная грудка',165,31,3.6,0],['Рис отварной',130,2.7,.3,28],['Гречка отварная',110,4.2,1.1,21],['Творог 5%',121,17,5,1.8],['Банан',89,1.1,.3,23],['Яблоко',52,.3,.2,14],['Огурец',15,.7,.1,3.6],['Лосось',208,20,13,0],['Йогурт натуральный',60,4,3,5]];
 
+const offline = window.balanceOffline;
+
 async function api(path, method = 'GET', data) {
+  if (offline) return offline.request(path, method, data);
   let response;
   try {
     response = await fetch('/api' + path, {
@@ -302,10 +305,12 @@ function reminderView(){
     return '<div class="entry"><div><b>'+esc(item.name)+'</b><small>'+esc(schedule)+(item.enabled?'':' · На паузе')+'</small></div><div><button data-switch="'+item.id+'">'+(item.enabled?'Пауза':'Включить')+'</button> <button data-drop="'+item.id+'" aria-label="Удалить напоминание">×</button></div></div>';
   }).join('');
   const checks=[1,2,3,4,5,6,0].map(d=>'<label><input type="checkbox" name="weekday" value="'+d+'" checked>'+weekdays[d]+'</label>').join('');
-  return panel('Сигнал напоминания','<button id="signalTest">Проверить звук и сообщение</button> <button id="systemAlerts">Системные уведомления</button><p id="notifyStatus" role="status"></p>')+panel('Мои напоминания',items||'<p>Пока нет напоминаний.</p>')+
+  const systemButton = offline ? '' : ' <button id="systemAlerts">Системные уведомления</button>';
+  return panel('Сигнал напоминания','<button id="signalTest">Проверить звук и сообщение</button>' + systemButton + '<p id="notifyStatus" role="status"></p>')+panel('Мои напоминания',items||'<p>Пока нет напоминаний.</p>')+
     panel('Новое расписание','<form id="schedule" class="formgrid"><label>О чём напомнить<input name="message" placeholder="Например, размяться" maxlength="100" required></label><label>Время<input type="time" name="time" value="09:00" required></label><fieldset class="days"><legend>Повторять по дням</legend>'+checks+'</fieldset><button class="primary">Добавить расписание</button></form>')+
     panel('Разовое напоминание о воде','<label>Через сколько минут<input type="number" id="delay" min="1" max="1440" value="30" required></label><button id="remind">Запустить таймер</button>')+
-    '<p class="muted">Расписания сохраняются в этом браузере для твоего аккаунта. Оставьте приложение открытым. При приостановке вкладки сигнал может появиться после возвращения.</p>';
+    (offline ? '<p class="muted">Оставь приложение открытым, чтобы услышать сигнал. Расписания хранятся на этом телефоне.</p>'
+      : '<p class="muted">Расписания сохраняются в этом браузере для твоего аккаунта. Оставьте приложение открытым. При приостановке вкладки сигнал может появиться после возвращения.</p>');
 }
 function checkReminders(){
   if(!user)return;
@@ -329,7 +334,8 @@ function bindReminders(){
     status.textContent=({granted:'Системные уведомления разрешены.',denied:'Системные уведомления заблокированы. Разрешите их в настройках сайта.',default:'Для системных уведомлений нужно разрешение браузера.'})[window.Notification?.permission]||'Доступны звук и сообщение внутри приложения.';
   }
   permissionStatus();
-  $('#systemAlerts').onclick=async()=>{
+  const systemAlerts = $('#systemAlerts');
+  if (systemAlerts) systemAlerts.onclick=async()=>{
     enableSound();
     try{if(window.Notification?.permission==='default')await Notification.requestPermission();permissionStatus()}
     catch{status.textContent='Проверьте разрешения уведомлений в настройках браузера.'}
@@ -415,11 +421,16 @@ function progressView() {
 function settingsView(goals) {
   const fields = [['calories','Энергия, ккал'], ['protein','Белки, г'], ['fat','Жиры, г'],
     ['carbs','Углеводы, г'], ['water','Вода, мл'], ['steps','Шаги']];
+  const backupActions = offline
+    ? '<p class="muted">Записи хранятся на этом телефоне. Сохрани копию или перенеси записи из веб-версии.</p>' +
+      '<div class="quick"><button id="export" class="soft">Экспортировать данные</button>' +
+      '<button id="import" class="soft">Импортировать JSON</button></div><input id="import-file" type="file" hidden>'
+    : '<p class="muted">Скачай свои записи в формате JSON.</p><button id="export" class="soft">Экспортировать данные</button>';
   return panel('Дневные цели', `<form id="goals" class="formgrid">
     ${fields.map(([key, label]) => `<label>${label}<input name="${key}" type="number" min="1"
           max="100000" required value="${esc(goals[key])}"></label>`).join('')}
     <button class="primary">Сохранить цели</button>
-  </form>`) + panel('Копия дневника', '<p class="muted">Скачай свои записи в формате JSON.</p><button id="export" class="soft">Экспортировать данные</button>');
+  </form>`) + panel('Копия дневника', backupActions);
 }
 
 const views = {
@@ -453,15 +464,15 @@ function render() {
           <span aria-hidden="true">${navigationIcon(name)}</span>${name}
         </button>`).join('')}
       </nav>
-      <div class="sidebarfoot">
+      ${offline ? '' : `<div class="sidebarfoot">
         <span class="avatar" aria-hidden="true">${esc(user.name.slice(0,1))}</span>
         <b>${esc(user.name)}</b><button id="logout" class="textbtn">Выйти</button>
-      </div>
+      </div>`}
     </aside>
     <main id="content" class="main" tabindex="-1">
       <header class="page-header"><div>
         ${overview ? '<p class="page-label">Обзор</p>' : ''}
-        <h1>${overview ? 'Привет, ' + esc(user.name) : page}</h1>
+        <h1>${overview ? (offline ? esc(user.name) : 'Привет, ' + esc(user.name)) : page}</h1>
       </div>
       ${showDate ? `<label class="date">Дата дневника<input id="date" type="date" max="${today()}" value="${date}"></label>` : ''}
       </header>
@@ -486,7 +497,8 @@ function bindPage() {
     date = picker.value && picker.value <= today() ? picker.value : today();
     render();
   };
-  $('#logout').onclick = async event => {
+  const logout = $('#logout');
+  if (logout) logout.onclick = async event => {
     const button = event.currentTarget;
     button.disabled = true;
     try {
@@ -536,12 +548,35 @@ function bindPage() {
   };
   const exportButton = $('#export');
   if (exportButton) exportButton.onclick = () => {
-    const url = URL.createObjectURL(new Blob([JSON.stringify({user, records}, null, 2)], {type: 'application/json'}));
+    const backup = JSON.stringify({user, records}, null, 2);
+    if (offline) {
+      window.BalanceAndroid.saveBackup(backup);
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([backup], {type: 'application/json'}));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'balance-diary.json';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const importButton = $('#import');
+  const input = $('#import-file');
+  if (importButton) importButton.onclick = () => input.click();
+  if (input) input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+    importButton.disabled = true;
+    try {
+      const count = await offline.importBackup(file);
+      await startSession(user);
+      toast(count ? 'Импортировано записей: ' + count : 'Новых записей нет');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      importButton.disabled = false;
+    }
   };
   bindDiaryTools();
   if (page === 'Напоминания') bindReminders();
@@ -661,6 +696,20 @@ function bindDiaryTools(){
   });
   if($('#newrecipe'))$('#newrecipe').onclick=recipeForm;
 }
+if (offline) window.balanceBack = () => {
+  const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
+  if (dialog) {
+    dialog.close();
+    return true;
+  }
+  if (user && page !== 'Обзор') {
+    page = 'Обзор';
+    render();
+    window.scrollTo(0, 0);
+    return true;
+  }
+  return false;
+};
 restoreSession();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if (!offline && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 

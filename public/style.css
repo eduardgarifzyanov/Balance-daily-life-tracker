@@ -245,3 +245,5 @@ dialog::backdrop { background: #16281ec0; }
   .entry > div:first-child { flex-basis: 100%; }
 }
 
+
+#import-file[hidden] { display: none; }

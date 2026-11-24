@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test.js records.test.js browser.test.js",
-    "test:coverage": "node --test --experimental-test-coverage test.js records.test.js browser.test.js"
+    "test": "node --test test.js records.test.js browser.test.js android/offline.test.js",
+    "test:coverage": "node --test --experimental-test-coverage test.js records.test.js browser.test.js android/offline.test.js"
   },
   "engines": {
     "node": ">=24"

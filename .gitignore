@@ -2,3 +2,7 @@ data/
 node_modules/
 *.log
 /runtime/
+/Balance.apk
+*.jks
+*.keystore
+*.p12
