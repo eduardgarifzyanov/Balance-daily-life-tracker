@@ -67,3 +67,11 @@ test('PWA manifest and app assets are served',async()=>{
    assert.equal((await fetch(base+path)).status,200,path);
  assert.equal((await fetch(base+'/missing')).status,404);
 });
+
+test('invalid JSON body shape returns 400', async () => {
+  for (const body of ['null', '[]']) {
+    const response = await fetch(base + '/api/records', {method: 'POST', headers: {Cookie: cookie}, body});
+    assert.equal(response.status, 400);
+  }
+});
+
